@@ -8,13 +8,26 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.image import img_to_array, load_img
 import numpy as np
 # Initialize the OCR model for English
-ocr = PaddleOCR(lang='en')
+ocr = PaddleOCR(
+    use_angle_cls=True,
+    lang='en',
+    use_gpu=False,
+    show_log=False,
+    enable_mkldnn=True,
+    cpu_threads=4
+)
 #yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
 # Function to extract text from an image
 def extract_text_from_image(image_path):
-    result = ocr.ocr(image_path, cls=True)
-    extracted_text = ' '.join([line[1][0] for line in result[0]])
-    return extracted_text
+    try:
+        result = ocr.ocr(image_path, cls=True)
+        if result and result[0]:
+            extracted_text = ' '.join([line[1][0] for line in result[0]])
+            return extracted_text
+        return ""
+    except Exception as e:
+        print(f"OCR Error: {str(e)}")
+        return ""
 
 # Load the fruit classification model
 model = load_model('DenseNet20_model.h5')  # Ensure the path to your model is correct
@@ -509,6 +522,30 @@ def upload():
 @app.route('/uploads/<filename>' )
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+# Add timeout handling for gunicorn
+class TimeoutMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    def __call__(self, environ, start_response):
+        try:
+            return self.app(environ, start_response)
+        except Exception as e:
+            print(f"Timeout Error: {str(e)}")
+            status = '503 Service Unavailable'
+            response_headers = [('Content-type', 'text/plain')]
+            start_response(status, response_headers)
+            return [b'Service temporarily unavailable']
+
+app.wsgi_app = TimeoutMiddleware(app.wsgi_app)
+
+# Add memory cleanup after processing
+@app.after_request
+def cleanup(response):
+    import gc
+    gc.collect()
+    return response
 
 if __name__ == '__main__':
     app.run(debug=True)
