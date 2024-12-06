@@ -8,6 +8,8 @@ ENV CUDA_VISIBLE_DEVICES ""
 ENV TF_ENABLE_ONEDNN_OPTS 0
 ENV HDF5_USE_FILE_LOCKING=FALSE
 ENV PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+ENV MALLOC_TRIM_THRESHOLD_=100000
+ENV PYTHONHASHSEED=0
 
 # Set work directory
 WORKDIR /app
@@ -36,11 +38,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY . .
 
-# Create uploads directory
+# Create uploads directory with proper permissions
 RUN mkdir -p uploads && chmod 777 uploads
 
 # Expose the port the app runs on
 EXPOSE 5000
 
-# Run the application with increased timeout
-CMD ["gunicorn", "--timeout", "300", "--workers", "1", "--bind", "0.0.0.0:5000", "app:app"]
+# Run the application with optimized settings
+CMD ["gunicorn", \
+     "--timeout", "300", \
+     "--workers", "1", \
+     "--threads", "4", \
+     "--worker-class", "gthread", \
+     "--worker-tmp-dir", "/dev/shm", \
+     "--bind", "0.0.0.0:5000", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "50", \
+     "app:app"]
