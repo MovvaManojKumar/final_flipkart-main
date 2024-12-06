@@ -4,6 +4,8 @@ FROM python:3.9-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
+ENV CUDA_VISIBLE_DEVICES ""
+ENV TF_ENABLE_ONEDNN_OPTS 0
 
 # Create a working directory
 WORKDIR /app
