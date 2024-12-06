@@ -29,8 +29,12 @@ def extract_text_from_image(image_path):
         print(f"OCR Error: {str(e)}")
         return ""
 
-# Load the fruit classification model
-model = load_model('DenseNet20_model.h5')  # Ensure the path to your model is correct
+# Modify the model loading part
+try:
+    model = load_model('DenseNet20_model.h5', compile=False)  # Add compile=False
+except Exception as e:
+    print(f"Error loading model: {str(e)}")
+    model = None
 
 # Class names for predictions
 class_names = {
@@ -381,6 +385,19 @@ def text_extraction():
 
 @app.route('/upload', methods=['GET', 'POST'])
 def upload():
+    if model is None:
+        return render_template_string('''
+            <!DOCTYPE html>
+            <html>
+            <head><title>Error</title></head>
+            <body>
+                <h1>Model not available</h1>
+                <p>The classification model could not be loaded. Please try again later.</p>
+                <a href="/">Back to Home</a>
+            </body>
+            </html>
+        ''')
+
     if request.method == 'POST':
         image_file = request.files['image']
         if image_file:
