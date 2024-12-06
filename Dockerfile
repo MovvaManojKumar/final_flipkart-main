@@ -6,6 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 ENV CUDA_VISIBLE_DEVICES ""
 ENV TF_ENABLE_ONEDNN_OPTS 0
+ENV HDF5_USE_FILE_LOCKING=FALSE
+ENV PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 
 # Set work directory
 WORKDIR /app
@@ -22,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     libjpeg-dev \
     zlib1g-dev \
     libpng-dev \
+    libhdf5-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
@@ -34,7 +37,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create uploads directory
-RUN mkdir -p uploads
+RUN mkdir -p uploads && chmod 777 uploads
 
 # Expose the port the app runs on
 EXPOSE 5000
