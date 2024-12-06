@@ -7,31 +7,45 @@ from datetime import datetime
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.image import img_to_array, load_img
 import numpy as np
-# Initialize the OCR model for English
+import gc
+import tensorflow as tf
+
+# Configure TensorFlow to use less memory
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
+
+# Configure TensorFlow to use less memory on CPU
+tf.config.threading.set_inter_op_parallelism_threads(1)
+tf.config.threading.set_intra_op_parallelism_threads(1)
+
+# Initialize OCR with optimized settings
 ocr = PaddleOCR(
     use_angle_cls=True,
     lang='en',
     use_gpu=False,
     show_log=False,
     enable_mkldnn=True,
-    cpu_threads=4
+    cpu_threads=2,  # Reduced from 4
+    enable_tensorrt=False,
+    det_limit_side_len=960,
+    rec_batch_num=1  # Reduced batch size
 )
-#yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-# Function to extract text from an image
-def extract_text_from_image(image_path):
-    try:
-        result = ocr.ocr(image_path, cls=True)
-        if result and result[0]:
-            extracted_text = ' '.join([line[1][0] for line in result[0]])
-            return extracted_text
-        return ""
-    except Exception as e:
-        print(f"OCR Error: {str(e)}")
-        return ""
 
-# Modify the model loading part
+# Modify model loading
 try:
-    model = load_model('DenseNet20_model.h5', compile=False)  # Add compile=False
+    # Load model with memory-efficient settings
+    model = tf.keras.models.load_model(
+        'DenseNet20_model.h5',
+        compile=False,
+        options=tf.saved_model.LoadOptions(
+            experimental_io_device='/job:localhost'
+        )
+    )
 except Exception as e:
     print(f"Error loading model: {str(e)}")
     model = None
@@ -399,86 +413,91 @@ def upload():
         ''')
 
     if request.method == 'POST':
-        image_file = request.files['image']
-        if image_file:
-            image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_file.filename)
-            image_file.save(image_path)
+        try:
+            image_file = request.files['image']
+            if image_file:
+                image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_file.filename)
+                image_file.save(image_path)
 
-            # Preprocess image and make a prediction
-            img_array = preprocess_image(image_path)
-            predictions = model.predict(img_array)
-            predicted_class = np.argmax(predictions, axis=1)[0]
-            predicted_label = class_names[predicted_class]
+                # Process image with memory cleanup
+                img_array = preprocess_image(image_path)
+                predictions = model.predict(img_array, batch_size=1)
+                predicted_class = np.argmax(predictions, axis=1)[0]
+                predicted_label = class_names[predicted_class]
+                confidence_score = float(predictions[0][predicted_class])
 
-            # Extract confidence score
-            confidence_score = predictions[0][predicted_class]
+                # Cleanup
+                cleanup_memory()
 
-            return render_template_string('''
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Freshness Prediction Result</title>
-                <style>
-                    body {
-                        font-family: Arial, sans-serif;
-                        background-color: #f0f0f0;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        height: 100vh;
-                        margin: 0;
-                    }
-                    .container {
-                        background-color: white;
-                        padding: 20px;
-                        border-radius: 8px;
-                        box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
-                        text-align: center;
-                    }
-                    h1 {
-                        color: #333;
-                    }
-                    .button {
-                        display: inline-block;
-                        background-color: #4CAF50;
-                        color: white;
-                        padding: 10px 20px;
-                        border: none;
-                        border-radius: 5px;
-                        cursor: pointer;
-                        text-decoration: none;
-                        margin: 10px;
-                    }
-                    img {
-                        max-width: 300px;
-                        margin: 20px 0;
-                        border: 2px solid #ddd;
-                        border-radius: 8px;
-                    }
-                    a {
-                        text-decoration: none;
-                        color: #4CAF50;
-                    }
-                    .button:hover {
-                        background-color: #45a049;
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h1>Freshness Prediction Result</h1>
-                    <img src="/uploads/{{ filename }}" alt="Uploaded Image">
-                    <p><strong>Predicted Class:</strong> {{ predicted_label }}</p>
-                    <p><strong>Confidence Score:</strong> {{ confidence_score }}</p>
-                    <a class="button" href="/upload">Upload Another Image</a>
-                    <br>
-                    <a class="button" href="/">Home</a>
-                </div>
-            </body>
-            </html>
-            ''', predicted_label=predicted_label, confidence_score=confidence_score, filename=image_file.filename)
+                return render_template_string('''
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Freshness Prediction Result</title>
+                    <style>
+                        body {
+                            font-family: Arial, sans-serif;
+                            background-color: #f0f0f0;
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            height: 100vh;
+                            margin: 0;
+                        }
+                        .container {
+                            background-color: white;
+                            padding: 20px;
+                            border-radius: 8px;
+                            box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
+                            text-align: center;
+                        }
+                        h1 {
+                            color: #333;
+                        }
+                        .button {
+                            display: inline-block;
+                            background-color: #4CAF50;
+                            color: white;
+                            padding: 10px 20px;
+                            border: none;
+                            border-radius: 5px;
+                            cursor: pointer;
+                            text-decoration: none;
+                            margin: 10px;
+                        }
+                        img {
+                            max-width: 300px;
+                            margin: 20px 0;
+                            border: 2px solid #ddd;
+                            border-radius: 8px;
+                        }
+                        a {
+                            text-decoration: none;
+                            color: #4CAF50;
+                        }
+                        .button:hover {
+                            background-color: #45a049;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>Freshness Prediction Result</h1>
+                        <img src="/uploads/{{ filename }}" alt="Uploaded Image">
+                        <p><strong>Predicted Class:</strong> {{ predicted_label }}</p>
+                        <p><strong>Confidence Score:</strong> {{ confidence_score }}</p>
+                        <a class="button" href="/upload">Upload Another Image</a>
+                        <br>
+                        <a class="button" href="/">Home</a>
+                    </div>
+                </body>
+                </html>
+                ''', predicted_label=predicted_label, confidence_score=confidence_score, filename=image_file.filename)
+        except Exception as e:
+            cleanup_memory()
+            return f"Error processing image: {str(e)}", 500
 
     return '''
     <!DOCTYPE html>
@@ -559,10 +578,14 @@ app.wsgi_app = TimeoutMiddleware(app.wsgi_app)
 
 # Add memory cleanup after processing
 @app.after_request
-def cleanup(response):
-    import gc
-    gc.collect()
+def add_header(response):
+    cleanup_memory()
     return response
+
+# Add cleanup function
+def cleanup_memory():
+    gc.collect()
+    tf.keras.backend.clear_session()
 
 if __name__ == '__main__':
     app.run(debug=True)
