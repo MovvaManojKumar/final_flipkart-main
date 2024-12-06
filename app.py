@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, send_from_directory, render_template_string
 import os
 from paddleocr import PaddleOCR
+ocr = PaddleOCR(use_gpu=False)
 import re
 from datetime import datetime
 from tensorflow.keras.models import load_model
